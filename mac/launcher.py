@@ -288,7 +288,7 @@ class LauncherApp(tk.Tk):
         self._wifi_ip_entry.configure(fg="#aaffaa" if is_wifi else "#555555")
 
         if is_wifi:
-            adb_msg = ""
+            self._adb_label.configure(text="")
         else:
             if _adb_available():
                 adb_msg = "✓  adb found — USB port forwarding will be set up automatically."
@@ -296,9 +296,7 @@ class LauncherApp(tk.Tk):
             else:
                 adb_msg = "⚠  adb not found — install via:  brew install android-platform-tools"
                 color = "#ffcc00"
-            self._adb_label.configure(text=adb_msg, fg=color if not is_wifi else "#555555")
-            return
-        self._adb_label.configure(text=adb_msg)
+            self._adb_label.configure(text=adb_msg, fg=color)
 
     def _detect_ips(self) -> None:
         ips = _get_local_ips()
@@ -421,9 +419,11 @@ class LauncherApp(tk.Tk):
             self._log_write(f"   Open MacScreen app → USB (ADB) mode, port: {port}\n")
 
         # Stream server output into the log
-        assert self._server_proc.stdout is not None
-        for line in self._server_proc.stdout:
-            self._log_write(line)
+        if self._server_proc.stdout is None:
+            self._log_write("⚠  Could not read server output.\n")
+        else:
+            for line in self._server_proc.stdout:
+                self._log_write(line)
         self._server_proc.wait()
         self._log_write(f"Server exited (code {self._server_proc.returncode}).\n")
         self.after(0, self._reset_buttons)
