@@ -51,6 +51,9 @@ _frame_lock = threading.Lock()
 _current_frame: bytes | None = None
 _monitor: dict | None = None  # mss monitor rect being captured
 
+# Whitelist of recognised touch event types.
+_VALID_EVENT_TYPES = frozenset({"down", "up", "move", "click", "rightclick", "scroll"})
+
 
 class Config:
     port: int = 8080
@@ -203,11 +206,15 @@ img{max-width:100%;border:1px solid #444}</style></head>
         body = self.rfile.read(length)
         try:
             data = json.loads(body)
-            event_type: str = data["type"]       # "down" | "up" | "move" | "click"
+            event_type: str = data["type"]       # "down" | "up" | "move" | "click" | "rightclick" | "scroll"
             norm_x: float = float(data["x"])     # 0.0 – 1.0
             norm_y: float = float(data["y"])     # 0.0 – 1.0
         except (json.JSONDecodeError, KeyError, ValueError):
             self.send_error(400, "Invalid JSON payload")
+            return
+
+        if event_type not in _VALID_EVENT_TYPES:
+            self.send_error(400, "Unknown event type")
             return
 
         if _PYAUTOGUI and _monitor:
@@ -224,6 +231,15 @@ img{max-width:100%;border:1px solid #444}</style></head>
                 pyautogui.moveTo(sx, sy)
             elif event_type == "click":
                 pyautogui.click(sx, sy)
+            elif event_type == "rightclick":
+                pyautogui.rightClick(sx, sy)
+            elif event_type == "scroll":
+                try:
+                    clicks = int(data.get("amount", 0))
+                except (TypeError, ValueError):
+                    clicks = 0
+                if clicks != 0:
+                    pyautogui.scroll(clicks, x=sx, y=sy)
 
         self.send_response(200)
         self.send_header("Content-Length", "0")

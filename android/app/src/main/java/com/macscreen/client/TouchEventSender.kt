@@ -41,7 +41,7 @@ class TouchEventSender(private var baseUrl: String) {
     /**
      * Enqueue a touch event for delivery.
      *
-     * @param type  One of `"down"`, `"up"`, `"move"`.
+     * @param type  One of `"down"`, `"up"`, `"move"`, `"click"`, `"rightclick"`.
      * @param x     Normalised X coordinate (0.0 = left edge, 1.0 = right edge).
      * @param y     Normalised Y coordinate (0.0 = top edge, 1.0 = bottom edge).
      */
@@ -61,6 +61,31 @@ class TouchEventSender(private var baseUrl: String) {
                 client.newCall(request).execute().use { /* consume and close */ }
             } catch (_: IOException) {
                 // Silently ignore — a missed touch event is not critical.
+            }
+        }
+    }
+
+    /**
+     * Enqueue a scroll event for delivery.
+     *
+     * @param x       Normalised X coordinate of the scroll position (0.0 – 1.0).
+     * @param y       Normalised Y coordinate of the scroll position (0.0 – 1.0).
+     * @param amount  Scroll wheel clicks: positive = scroll up, negative = scroll down.
+     *                Should be a non-zero integer value.
+     */
+    fun sendScroll(x: Float, y: Float, amount: Int) {
+        if (executor.isShutdown || amount == 0) return
+        executor.execute {
+            try {
+                val json = """{"type":"scroll","x":$x,"y":$y,"amount":$amount}"""
+                val body = json.toRequestBody(mediaType)
+                val request = Request.Builder()
+                    .url("$baseUrl/touch")
+                    .post(body)
+                    .build()
+                client.newCall(request).execute().use { /* consume and close */ }
+            } catch (_: IOException) {
+                // Silently ignore — a missed scroll event is not critical.
             }
         }
     }

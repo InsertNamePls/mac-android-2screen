@@ -142,9 +142,20 @@ mac-android-2screen/
 
 | Problem | Fix |
 |---------|-----|
-| Blank screen / "Error: Stream error" | Check the server is running and the port matches. For USB, re-run `setup_usb.sh`. |
+| Blank screen / "Error: Stream error" | Check the server is running and the port matches. For USB, re-run `setup_usb.sh`. The app will auto-reconnect — you can also tap **Retry** to reconnect immediately. |
 | High latency | Lower `--fps` or `--quality`; use USB instead of Wi-Fi. |
 | Touch misaligned | Ensure the tablet is in landscape orientation matching the streamed display. |
 | `adb: command not found` | `brew install android-platform-tools` |
 | `pyautogui` permission denied | macOS requires Accessibility permission: System Settings → Privacy & Security → Accessibility → add Terminal/Python. |
 | Can't drag windows to tablet display | Use BetterDisplay to create a virtual display first; then assign it the tablet's resolution. |
+
+---
+
+## Touch gestures
+
+| Gesture | Action on Mac |
+|---------|--------------|
+| Single tap | Left-click |
+| Tap and drag | Left-click drag |
+| Long press (≈ 0.5 s) | Right-click |
+| Two-finger vertical drag | Scroll wheel up / down |

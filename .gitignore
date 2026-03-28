@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Android / Gradle
+.gradle/
+local.properties
+android/.idea/
+*.iml
+android/app/build/
+android/build/
+
+# macOS
+.DS_Store
