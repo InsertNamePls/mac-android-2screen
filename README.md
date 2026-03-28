@@ -17,6 +17,7 @@ monitor** for your Mac — wired via USB or over Wi-Fi.
 
 | Component | Location | Role |
 |-----------|----------|------|
+| **Launcher** | `mac/launcher.py` | GUI launcher — one click sets up the virtual display, ADB forwarding, and the streaming server. |
 | **Mac server** | `mac/server.py` | Captures a display with `mss`, streams it as MJPEG over HTTP, and injects touch events received from the tablet as mouse events via `pyautogui`. |
 | **Android app** | `android/` | Full-screen MJPEG viewer built with a `SurfaceView`. Forwards touch events to the server as normalised-coordinate JSON POST requests. Supports USB (ADB reverse) and Wi-Fi modes. |
 | **Scripts** | `scripts/` | One-command USB/Wi-Fi setup helpers. |
@@ -44,6 +45,35 @@ your Mac that macOS treats as a physical second screen:
   create a virtual/dummy display at your tablet's resolution, then pass
   `--display 2` (or whatever index macOS assigns) to the server.
 - Alternatively, stream any existing display with `--display 1` (primary).
+
+---
+
+## Quick start — GUI launcher
+
+The easiest way to get everything running is the built-in GUI launcher.
+It handles the virtual display, ADB port-forwarding, and server startup
+with a single click.
+
+```bash
+# Install Python dependencies (first time only):
+pip install -r mac/requirements.txt
+
+# Launch the GUI:
+python mac/launcher.py
+```
+
+The launcher window lets you:
+
+| Feature | Details |
+|---------|---------|
+| **Create Virtual Display** | Creates a headless virtual display at your chosen resolution so macOS treats the tablet as a real second monitor. Requires `displayplacer` (`brew install displayplacer`). |
+| **Connection Mode** | Choose **USB (ADB)** for low-latency wired use, or **Wi-Fi** — the launcher shows your Mac's IP to enter in the Android app. |
+| **Server Settings** | Pick display index, port, FPS, and JPEG quality without touching the command line. |
+| **▶ Start** | Runs ADB reverse forwarding (USB mode) then starts the MJPEG server automatically. |
+| **■ Stop** | Gracefully stops the server. |
+| **Log panel** | Shows live server output and connection hints. |
+
+> **Virtual display tip:** if `displayplacer` is not installed the *Create Virtual Display* button is disabled, but you can still stream your primary display or any display created manually with BetterDisplay.
 
 ---
 
@@ -113,6 +143,7 @@ You can also preview the stream in any browser: `http://localhost:8080/`
 ```
 mac-android-2screen/
 ├── mac/
+│   ├── launcher.py          # GUI launcher — Start button, virtual display, ADB setup
 │   ├── server.py            # MJPEG streaming server + touch event receiver
 │   └── requirements.txt     # Python dependencies
 ├── android/
