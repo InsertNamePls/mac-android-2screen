@@ -3,6 +3,9 @@ package com.macscreen.client
 import android.app.AlertDialog
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowInsets
@@ -26,6 +29,12 @@ import com.macscreen.client.databinding.ActivityMainBinding
  * • **Wi-Fi** — enter the Mac's LAN IP address; both devices must be on the
  *   same network.
  *
+ * Touch gestures
+ * ──────────────
+ * • **Single tap / drag** — forwarded as left mouse button press/move/release.
+ * • **Long press** — sends a right-click at the pressed position.
+ * • **Two-finger vertical drag** — forwarded as scroll-wheel events.
+ *
  * Touch events are forwarded as normalised coordinates so the Mac server can
  * translate them to the correct position within the captured display region.
  */
@@ -35,6 +44,46 @@ class MainActivity : AppCompatActivity() {
     private var touchSender: TouchEventSender? = null
 
     private val prefs by lazy { getSharedPreferences("macscreen_prefs", MODE_PRIVATE) }
+
+    // ------------------------------------------------------------------
+    // Auto-reconnect state
+    // ------------------------------------------------------------------
+
+    private val reconnectHandler = Handler(Looper.getMainLooper())
+    /** Delay before the next automatic reconnect attempt; doubles on each failure. */
+    private var reconnectDelayMs = 1_000L
+
+    // ------------------------------------------------------------------
+    // Touch-gesture state
+    // ------------------------------------------------------------------
+
+    /** Set to true once a long-press has been detected; suppresses the following UP. */
+    private var longPressConsumed = false
+    /** True while a two-finger scroll gesture is in progress. */
+    private var isScrolling = false
+    /** Y-coordinate of the primary pointer at the last MOVE sample (for scroll delta). */
+    private var prevScrollY = 0f
+    /** Fractional scroll accumulator; keeps sub-click movements and applies them later. */
+    private var scrollAccumulator = 0f
+
+    companion object {
+        /** Tablet pixels of two-finger vertical movement that equal one Mac scroll-wheel click. */
+        private const val PIXELS_PER_SCROLL_CLICK = 60f
+    }
+
+    /** Detects long-press gestures and maps them to right-click events. */
+    private val gestureDetector by lazy {
+        GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onLongPress(e: MotionEvent) {
+                longPressConsumed = true
+                val x = (e.x / binding.mjpegView.width).coerceIn(0f, 1f)
+                val y = (e.y / binding.mjpegView.height).coerceIn(0f, 1f)
+                // Cancel the initial mouse-down that was already sent, then right-click.
+                touchSender?.send("up", x, y)
+                touchSender?.send("rightclick", x, y)
+            }
+        })
+    }
 
     // ------------------------------------------------------------------
     // System UI
@@ -73,13 +122,17 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         binding.settingsButton.setOnClickListener { showSettingsDialog() }
-        binding.retryButton.setOnClickListener { connect() }
+        binding.retryButton.setOnClickListener {
+            reconnectDelayMs = 1_000L  // manual retry resets the backoff
+            connect()
+        }
 
         connect()
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        reconnectHandler.removeCallbacksAndMessages(null)
         touchSender?.shutdown()
     }
 
@@ -88,8 +141,66 @@ class MainActivity : AppCompatActivity() {
     // ------------------------------------------------------------------
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        gestureDetector.onTouchEvent(event)
         val sender = touchSender ?: return super.onTouchEvent(event)
 
+        // Reset gesture state at the start of every new touch sequence.
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            longPressConsumed = false
+            isScrolling = false
+            scrollAccumulator = 0f
+        }
+
+        // Cancel any active gesture on system cancellation.
+        if (event.actionMasked == MotionEvent.ACTION_CANCEL) {
+            longPressConsumed = false
+            isScrolling = false
+            scrollAccumulator = 0f
+            return true
+        }
+
+        // ── Two-finger scroll ──────────────────────────────────────────
+        if (event.pointerCount >= 2) {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_POINTER_DOWN -> {
+                    // A second finger joined — cancel the pending single-touch press
+                    // so the Mac doesn't see a dangling mouse-down.
+                    if (!longPressConsumed) {
+                        val cx = (event.getX(0) / binding.mjpegView.width).coerceIn(0f, 1f)
+                        val cy = (event.getY(0) / binding.mjpegView.height).coerceIn(0f, 1f)
+                        sender.send("up", cx, cy)
+                        longPressConsumed = true  // suppress further single-touch events
+                    }
+                    isScrolling = true
+                    prevScrollY = event.getY(0)
+                    scrollAccumulator = 0f
+                }
+                MotionEvent.ACTION_MOVE -> if (isScrolling) {
+                    val dy = prevScrollY - event.getY(0)
+                    prevScrollY = event.getY(0)
+                    // Accumulate sub-click movements; only send whole-click amounts.
+                    scrollAccumulator += dy / PIXELS_PER_SCROLL_CLICK
+                    val clicks = scrollAccumulator.toInt()
+                    if (clicks != 0) {
+                        scrollAccumulator -= clicks.toFloat()
+                        val x = (event.getX(0) / binding.mjpegView.width).coerceIn(0f, 1f)
+                        val y = (event.getY(0) / binding.mjpegView.height).coerceIn(0f, 1f)
+                        sender.sendScroll(x, y, clicks)
+                    }
+                }
+            }
+            return true
+        }
+
+        // ── Suppress single-touch events after long-press or scroll ───
+        if (longPressConsumed || isScrolling) {
+            if (event.actionMasked == MotionEvent.ACTION_UP) {
+                isScrolling = false
+            }
+            return true
+        }
+
+        // ── Single-finger forwarding ───────────────────────────────────
         // Normalise to 0.0–1.0 relative to the stream view dimensions.
         val x = (event.x / binding.mjpegView.width).coerceIn(0f, 1f)
         val y = (event.y / binding.mjpegView.height).coerceIn(0f, 1f)
@@ -120,6 +231,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun connect() {
+        reconnectHandler.removeCallbacksAndMessages(null)
+
         val baseUrl = buildBaseUrl()
         setStatus("Connecting to $baseUrl …")
         binding.retryButton.visibility = View.GONE
@@ -128,15 +241,30 @@ class MainActivity : AppCompatActivity() {
         touchSender = TouchEventSender(baseUrl)
 
         binding.mjpegView.onConnected = {
-            runOnUiThread { setStatus("Connected") }
+            runOnUiThread {
+                reconnectDelayMs = 1_000L  // reset backoff on a successful connection
+                setStatus("Connected")
+            }
         }
         binding.mjpegView.onError = { msg ->
             runOnUiThread {
                 setStatus("Error: $msg")
                 binding.retryButton.visibility = View.VISIBLE
+                scheduleReconnect()
             }
         }
         binding.mjpegView.setStreamUrl("$baseUrl/stream")
+    }
+
+    /**
+     * Schedule an automatic reconnect attempt after [reconnectDelayMs] milliseconds,
+     * then double the delay (capped at 30 s) for the next potential failure.
+     */
+    private fun scheduleReconnect() {
+        reconnectHandler.postDelayed({
+            if (!isFinishing && !isDestroyed) connect()
+        }, reconnectDelayMs)
+        reconnectDelayMs = (reconnectDelayMs * 2).coerceAtMost(30_000L)
     }
 
     private fun setStatus(msg: String) {
@@ -202,6 +330,7 @@ class MainActivity : AppCompatActivity() {
                     .putString("host", host)
                     .putInt("port", port)
                     .apply()
+                reconnectDelayMs = 1_000L  // reset backoff on deliberate settings change
                 connect()
             }
             .setNegativeButton("Cancel", null)
